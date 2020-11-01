@@ -13,7 +13,7 @@ final class ClientServerKadProtocolUtils {
         return new KadNode(new KadId(n.getNodeId()), kademlia, n.getAddress().toByteArray(), n.getPort());
     }
 
-    static void baseHandle(KadNode node, Kademlia kademlia) {
+    static void baseHandle(final KadNode node, Kademlia kademlia) {
         KadRoutingTable table = kademlia.getRoutingTable();
         if (table.contains(node))
             return;
@@ -39,10 +39,10 @@ final class ClientServerKadProtocolUtils {
                 callStore = true;
             if (callStore) {
                 node.store(
-                    StoreRequest.newBuilder().
+                    kademlia.getStoreRequestBuilder().
                         setKey(ByteString.copyFrom(key)).
                         setVal(ByteString.copyFrom(val)).
-                        setNodeId(owner.getId().asByteString()).build()
+                        build()
                 );
             }
         });

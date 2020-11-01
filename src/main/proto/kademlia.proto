@@ -20,6 +20,7 @@ message Node {
 
 message Ping {
   bytes node_id = 1;
+  uint32 port = 2;
 }
 
 message Pong {
@@ -30,11 +31,13 @@ message StoreRequest {
   bytes node_id = 1;
   bytes key = 2;
   bytes val = 3;
+  uint32 port = 4;
 }
 
 message FindNodeRequest {
   bytes node_id = 1;
   bytes key = 2;
+  uint32 port = 3;
 }
 
 message FindNodeResponse {
@@ -45,6 +48,7 @@ message FindNodeResponse {
 message FindValueRequest {
   bytes node_id = 1;
   bytes key = 2;
+  uint32 port = 3;
 }
 
 message FindValueResponse {

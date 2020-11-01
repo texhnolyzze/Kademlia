@@ -5,7 +5,8 @@ import java.util.concurrent.TimeUnit;
 public class KadOptions {
 
     private int k = 20;
-    private int alpha = 3;
+    private int alpha;
+    private double alphaFactor = 0.15;
     private int port = 0;
     private boolean overwritePersistedPort = false;
     private int replacementCacheSize = k * 3;
@@ -19,7 +20,7 @@ public class KadOptions {
     public KadOptions copy() {
         KadOptions copy = new KadOptions();
         copy.k = this.k;
-        copy.alpha = this.alpha;
+        copy.alphaFactor = this.alphaFactor;
         copy.port = this.port;
         copy.overwritePersistedPort = this.overwritePersistedPort;
         copy.replacementCacheSize = this.replacementCacheSize;
@@ -29,6 +30,7 @@ public class KadOptions {
         copy.kademliaPoolSize = this.kademliaPoolSize;
         copy.grpcPoolSize = this.grpcPoolSize;
         copy.saveStateToFileIntervalMillis = this.saveStateToFileIntervalMillis;
+        copy.alpha = (int) Math.max(1, alphaFactor * k);
         return copy;
     }
 
@@ -113,12 +115,16 @@ public class KadOptions {
         return this;
     }
 
-    public int getAlpha() {
+    int getAlpha() {
         return alpha;
     }
 
-    public KadOptions setAlpha(int alpha) {
-        this.alpha = alpha;
+    public double getAlphaFactor() {
+        return alphaFactor;
+    }
+
+    public KadOptions setAlphaFactor(double alphaFactor) {
+        this.alphaFactor = alphaFactor;
         return this;
     }
 

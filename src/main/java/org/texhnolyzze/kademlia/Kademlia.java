@@ -27,6 +27,9 @@ public class Kademlia {
     private static final Logger LOG = LoggerFactory.getLogger(Kademlia.class);
 
     private final Ping ping;
+    private final StoreRequest storeRequest;
+    private final FindNodeRequest findNodeRequest;
+    private final FindValueRequest findValueRequest;
 
     private final Storage storage;
     private final KadOptions options;
@@ -82,10 +85,14 @@ public class Kademlia {
             }).build();
             server.start();
             ownerNode.setPort(server.getPort());
+            LOG.info("Server started listening on port {}", server.getPort());
         } catch (IOException e) {
             throw new KademliaException("Can't initialize server", e);
         }
-        this.ping = Ping.newBuilder().setNodeId(getOwnerNode().getId().asByteString()).build();
+        this.ping = Ping.newBuilder().setNodeId(getOwnerNode().getId().asByteString()).setPort(getOwnerNode().getPort()).build();
+        this.storeRequest = StoreRequest.newBuilder().setNodeId(getOwnerNode().getId().asByteString()).setPort(getOwnerNode().getPort()).build();
+        this.findNodeRequest = FindNodeRequest.newBuilder().setNodeId(getOwnerNode().getId().asByteString()).setPort(getOwnerNode().getPort()).build();
+        this.findValueRequest = FindValueRequest.newBuilder().setNodeId(getOwnerNode().getId().asByteString()).setPort(getOwnerNode().getPort()).build();
     }
 
     private State loadFromFile() {
@@ -171,6 +178,8 @@ public class Kademlia {
     }
 
     private boolean put0(KadId key, byte[] val) {
+        if (val == null || val.length == 0)
+            throw new IllegalArgumentException("Empty/Null value not allowed.");
         MinMaxPriorityQueue<KadNode> neighbours = routingTable.getNeighboursOf(key, null, true);
         if (neighbours.isEmpty()) {
             LOG.warn("Can't publish key {}. No neighbours found.", key);
@@ -186,9 +195,9 @@ public class Kademlia {
         else
             storage.remove(key.getRaw());
         ByteString valAsByteString = ByteString.copyFrom(val);
-        StoreRequest request = StoreRequest.newBuilder().
+
+        StoreRequest request = getStoreRequestBuilder().
             setKey(key.asByteString()).
-            setNodeId(getOwnerNode().getId().asByteString()).
             setVal(valAsByteString).
             build();
         final boolean[] atLeastOneStored = {false};
@@ -362,6 +371,18 @@ public class Kademlia {
 
     Ping getPing() {
         return ping;
+    }
+
+    StoreRequest.Builder getStoreRequestBuilder() {
+        return StoreRequest.newBuilder(storeRequest);
+    }
+
+    FindNodeRequest.Builder getFindNodeRequestBuilder() {
+        return FindNodeRequest.newBuilder(findNodeRequest);
+    }
+
+    FindValueRequest.Builder getFindValueRequestBuilder() {
+        return FindValueRequest.newBuilder(findValueRequest);
     }
 
     private static class State {

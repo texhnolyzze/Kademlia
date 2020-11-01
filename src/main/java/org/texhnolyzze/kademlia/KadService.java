@@ -17,7 +17,7 @@ class KadService extends KademliaGrpc.KademliaImplBase {
 
     @Override
     public void ping(Ping request, StreamObserver<Pong> responseObserver) {
-        KadNode node = getNode(request.getNodeId());
+        KadNode node = getNode(request.getNodeId(), request.getPort());
         ClientServerKadProtocolUtils.baseHandle(node, kademlia);
         responseObserver.onNext(pong());
         responseObserver.onCompleted();
@@ -25,7 +25,7 @@ class KadService extends KademliaGrpc.KademliaImplBase {
 
     @Override
     public void store(StoreRequest request, StreamObserver<Pong> responseObserver) {
-        KadNode node = getNode(request.getNodeId());
+        KadNode node = getNode(request.getNodeId(), request.getPort());
         ClientServerKadProtocolUtils.baseHandle(node, kademlia);
         Storage storage = kademlia.getStorage();
         storage.put(request.getKey().toByteArray(), request.getVal().toByteArray());
@@ -35,7 +35,7 @@ class KadService extends KademliaGrpc.KademliaImplBase {
 
     @Override
     public void findNode(FindNodeRequest request, StreamObserver<FindNodeResponse> responseObserver) {
-        KadNode node = getNode(request.getNodeId());
+        KadNode node = getNode(request.getNodeId(), request.getPort());
         ClientServerKadProtocolUtils.baseHandle(node, kademlia);
         KadId id = new KadId(request.getKey());
         FindNodeResponse.Builder builder = FindNodeResponse.newBuilder().setNodeId(kademlia.getOwnerNode().getId().asByteString());
@@ -46,7 +46,7 @@ class KadService extends KademliaGrpc.KademliaImplBase {
 
     @Override
     public void findValue(FindValueRequest request, StreamObserver<FindValueResponse> responseObserver) {
-        KadNode node = getNode(request.getNodeId());
+        KadNode node = getNode(request.getNodeId(), request.getPort());
         ClientServerKadProtocolUtils.baseHandle(node, kademlia);
         KadId id = new KadId(request.getKey());
         byte[] key = id.getRaw();
@@ -82,9 +82,9 @@ class KadService extends KademliaGrpc.KademliaImplBase {
         ).build();
     }
 
-    private KadNode getNode(ByteString nodeId) {
+    private KadNode getNode(ByteString nodeId, int port) {
         InetSocketAddress address = Kademlia.REMOTE_ADDR.get();
-        return new KadNode(new KadId(nodeId), kademlia, address.getAddress().getAddress(), address.getPort());
+        return new KadNode(new KadId(nodeId), kademlia, address.getAddress().getAddress(), port);
     }
 
 }

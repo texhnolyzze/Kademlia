@@ -50,7 +50,7 @@ class ValueResolver extends BaseResolver<FindValueRequest, FindValueResponse, by
 
     @Override
     FindValueRequest getRequest(ByteString ownerId, ByteString key) {
-        return FindValueRequest.newBuilder().setNodeId(ownerId).setKey(key).build();
+        return kademlia.getFindValueRequestBuilder().setKey(key).build();
     }
 
     @Override
@@ -71,7 +71,7 @@ class ValueResolver extends BaseResolver<FindValueRequest, FindValueResponse, by
 
         @Override
         void process(FindValueResponse response) {
-            if (response.getVal() != null) {
+            if (!response.getVal().isEmpty()) {
                 values.add(response.getVal().toByteArray());
             } else {
                 if (nearestWithoutValue == null) {

@@ -7,10 +7,15 @@ import io.grpc.stub.StreamObserver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.net.InetAddress;
+import java.net.Inet4Address;
 import java.net.UnknownHostException;
 import java.util.Arrays;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
 class KadNode {
 
@@ -20,6 +25,7 @@ class KadNode {
     private final byte[] address;
     private final Kademlia kademlia;
     private ByteString addressAsByteString;
+    private String addressAsString;
     private int port;
     private KademliaGrpc.KademliaStub stub;
     private NoopClientStreamObserver<Pong> pongClientStreamObserver;
@@ -51,6 +57,17 @@ class KadNode {
 
     KadId getId() {
         return id;
+    }
+
+    String getAddressAsString() {
+        if (addressAsString == null) {
+            try {
+                return Inet4Address.getByAddress(address).getHostAddress();
+            } catch (UnknownHostException e) {
+                throw new KademliaException("Error converting to string", e);
+            }
+        }
+        return addressAsString;
     }
 
     byte[] getAddress() {
@@ -97,18 +114,27 @@ class KadNode {
         stub().findValue(request, responseObserver);
     }
 
+    private static final ConcurrentMap<Map.Entry<String, Integer>, ManagedChannelHolder> CHANNELS = new ConcurrentHashMap<>();
+
     private KademliaGrpc.KademliaStub stub() {
         if (stub == null) {
-            try {
-                stub = KademliaGrpc.newStub(
+            Map.Entry<String, Integer> entry = Map.entry(getAddressAsString(), port);
+            ManagedChannelHolder holder = CHANNELS.computeIfAbsent(entry, addr ->
+                new ManagedChannelHolder(
                     ManagedChannelBuilder.
-                        forAddress(InetAddress.getByAddress(address).getHostAddress(), port).
-                        usePlaintext().
+                        forAddress(addr.getKey(), addr.getValue()).
                         executor(kademlia.getGrpcExecutor()).
+                        usePlaintext().
                         build()
-                );
-            } catch (UnknownHostException e) {
-                throw new KademliaException("Error getting host", e);
+                )
+            );
+            holder.lock.lock();
+            try {
+                holder.refCount++;
+                stub = KademliaGrpc.newStub(holder.channel);
+                CHANNELS.putIfAbsent(entry, holder);
+            } finally {
+                holder.lock.unlock();
             }
         }
         return stub;
@@ -126,15 +152,45 @@ class KadNode {
 
     void dispose() {
         if (stub != null) {
-            ManagedChannel channel = (ManagedChannel) stub.getChannel();
-            channel.shutdown();
+            Map.Entry<String, Integer> entry = Map.entry(getAddressAsString(), port);
+            ManagedChannelHolder holder = CHANNELS.get(entry);
+            holder.lock.lock();
             try {
-                channel.awaitTermination(150, TimeUnit.SECONDS);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                LOG.error("Channel shutdown awaiting interrupted", e);
+                if (--holder.refCount == 0) {
+                    ManagedChannel channel = holder.channel;
+                    channel.shutdown();
+                    boolean interrupted = false;
+                    while (true) {
+                        try {
+                            boolean terminated = channel.awaitTermination(1, TimeUnit.MINUTES);
+                            if (terminated)
+                                break;
+                        } catch (InterruptedException e) {
+                            interrupted = true;
+                            LOG.error("Channel shutdown awaiting interrupted", e);
+                        }
+                    }
+                    if (interrupted)
+                        Thread.currentThread().interrupt();
+                    CHANNELS.remove(entry);
+                }
+            } finally {
+                holder.lock.unlock();
             }
         }
+    }
+
+    private static class ManagedChannelHolder {
+
+        private final ManagedChannel channel;
+        private final Lock lock;
+        private int refCount = 1;
+
+        private ManagedChannelHolder(ManagedChannel channel) {
+            this.channel = channel;
+            this.lock = new ReentrantLock();
+        }
+
     }
 
 }

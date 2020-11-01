@@ -17,8 +17,7 @@ class InMemoryStorage implements Storage {
         lock.readLock().lock();
         try {
             TimestampedData tsData = this.data.get(key);
-            lock.readLock().unlock();
-            return tsData.data;
+            return tsData == null ? null : tsData.data;
         } finally {
             lock.readLock().unlock();
         }
