@@ -1,0 +1,55 @@
+syntax = "proto3";
+
+package kademlia;
+
+option java_package = "org.texhnolyzze.kademlia";
+option java_multiple_files = true;
+
+service Kademlia {
+  rpc ping(Ping) returns (Pong);
+  rpc store(StoreRequest) returns (Pong);
+  rpc find_node(FindNodeRequest) returns (FindNodeResponse);
+  rpc find_value(FindValueRequest) returns (FindValueResponse);
+}
+
+message Node {
+  bytes node_id = 1;
+  bytes address = 2;
+  uint32 port = 3;
+}
+
+message Ping {
+  bytes node_id = 1;
+}
+
+message Pong {
+  bytes node_id = 1;
+}
+
+message StoreRequest {
+  bytes node_id = 1;
+  bytes key = 2;
+  bytes val = 3;
+}
+
+message FindNodeRequest {
+  bytes node_id = 1;
+  bytes key = 2;
+}
+
+message FindNodeResponse {
+  bytes node_id = 1;
+  repeated Node nodes = 2;
+}
+
+message FindValueRequest {
+  bytes node_id = 1;
+  bytes key = 2;
+}
+
+message FindValueResponse {
+  bytes node_id = 1;
+  bytes val = 2;
+  repeated Node nodes = 3;
+}
+
