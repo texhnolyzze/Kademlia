@@ -83,7 +83,7 @@ class KadService extends KademliaGrpc.KademliaImplBase {
     }
 
     private KadNode getNode(ByteString nodeId) {
-        InetSocketAddress address = Kademlia.TL_REMOTE_ADDR.get();
+        InetSocketAddress address = Kademlia.REMOTE_ADDR.get();
         return new KadNode(new KadId(nodeId), kademlia, address.getAddress().getAddress(), address.getPort());
     }
 

@@ -24,7 +24,8 @@ class NoopClientStreamObserver<E> implements StreamObserver<E> {
 
     @Override
     public void onError(Throwable throwable) {
-        kademlia.getRoutingTable().removeNode(node);
+        if (node.getId() != null)
+            kademlia.getRoutingTable().removeNode(node);
     }
 
 }

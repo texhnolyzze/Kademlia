@@ -16,18 +16,22 @@ import java.util.*;
 import java.util.concurrent.*;
 
 import static java.nio.file.StandardOpenOption.*;
+import static java.util.stream.Collectors.toList;
 
 public class Kademlia {
 
     private static final Path STATE_FILE = Path.of("kad-state");
 
-    static final ThreadLocal<InetSocketAddress> TL_REMOTE_ADDR = new ThreadLocal<>();
+    static final Context.Key<InetSocketAddress> REMOTE_ADDR = Context.key("remote-addr");
 
     private static final Logger LOG = LoggerFactory.getLogger(Kademlia.class);
+
+    private final Ping ping;
 
     private final Storage storage;
     private final KadOptions options;
     private final ScheduledExecutorService executor;
+    private final Executor grpcExecutor;
     private final KadRoutingTable routingTable;
 
     private final KadNode ownerNode;
@@ -67,19 +71,21 @@ public class Kademlia {
                 this.routingTable.addNode(node);
         }
         try {
-            Executor grpcExecutor = Executors.newFixedThreadPool(this.options.getGrpcPoolSize());
+            this.grpcExecutor = Executors.newFixedThreadPool(this.options.getGrpcPoolSize());
             server = ServerBuilder.forPort(port).addService(new KadService(this)).executor(grpcExecutor).intercept(new ServerInterceptor() {
                 @Override
                 public <R0, R1> ServerCall.Listener<R0> interceptCall(ServerCall<R0, R1> call, Metadata headers, ServerCallHandler<R0, R1> next) {
                     InetSocketAddress address = (InetSocketAddress) call.getAttributes().get(Grpc.TRANSPORT_ATTR_REMOTE_ADDR);
-                    TL_REMOTE_ADDR.set(address);
-                    return next.startCall(call, headers);
+                    Context context = Context.current().withValue(REMOTE_ADDR, address);
+                    return Contexts.interceptCall(context, call, headers, next);
                 }
             }).build();
             server.start();
+            ownerNode.setPort(server.getPort());
         } catch (IOException e) {
             throw new KademliaException("Can't initialize server", e);
         }
+        this.ping = Ping.newBuilder().setNodeId(getOwnerNode().getId().asByteString()).build();
     }
 
     private State loadFromFile() {
@@ -115,7 +121,7 @@ public class Kademlia {
         try (OutputStream stream = Files.newOutputStream(STATE_FILE, WRITE, TRUNCATE_EXISTING, CREATE)) {
             Collection<KadNode> neighbours = routingTable.getNeighboursOf(ownerNode.getId(), null, false);
             byte[] state = new byte[(2 + KadId.SIZE_BYTES) + (neighbours.size() * (KadId.SIZE_BYTES + 2 + 4))];
-            int port = server.getPort();
+            int port = ownerNode.getPort();
             int i = 0;
             state[i++] = (byte) ((port >>> 8) & 0xFF);
             state[i++] = (byte) (port & 0xFF);
@@ -157,7 +163,7 @@ public class Kademlia {
             return null;
         }
         ValueResolver resolver = new ValueResolver(id, this, neighbours);
-        return resolver.getResult();
+        return resolver.resolve();
     }
 
     public boolean put(byte[] key, byte[] val) {
@@ -171,7 +177,7 @@ public class Kademlia {
             return false;
         }
         NodeResolver resolver = new NodeResolver(key, this, neighbours);
-        neighbours = resolver.getResult();
+        neighbours = resolver.resolve();
         byte[] dist1 = getOwnerNode().getId().distanceTo(key);
         byte[] dist2 = neighbours.peekLast().getId().distanceTo(key);
         boolean storeInLocal = KadId.compare(dist1, dist2) < 0;
@@ -214,6 +220,61 @@ public class Kademlia {
         return atLeastOneStored[0];
     }
 
+    public void bootstrap() {
+        MinMaxPriorityQueue<KadNode> neighbours = routingTable.getNeighboursOf(getOwnerNode().getId(), null, true);
+        if (neighbours.isEmpty()) {
+            throw new KademliaException("Can't perform bootstrap. No neighbours found.");
+        }
+        bootstrap(neighbours);
+    }
+
+    public void bootstrap(List<InetSocketAddress> addresses) {
+        List<KadNode> nodes = addresses.stream().map(address ->
+            new KadNode(address.getAddress().getAddress(), address.getPort(), this)
+        ).collect(toList());
+        CountDownLatch latch = new CountDownLatch(nodes.size());
+        byte[] dist1 = new byte[KadId.SIZE_BYTES];
+        byte[] dist2 = new byte[KadId.SIZE_BYTES];
+        MinMaxPriorityQueue<KadNode> neighbours = MinMaxPriorityQueue.<KadNode>orderedBy((n1, n2) -> {
+            n1.getId().distanceTo(getOwnerNode().getId(), dist1);
+            n2.getId().distanceTo(getOwnerNode().getId(), dist2);
+            return KadId.compare(dist1, dist2);
+        }).maximumSize(getOptions().getK()).create();
+        for (KadNode node : nodes) {
+            node.ping(new NoopClientStreamObserver<>(node, this) {
+
+                @Override
+                public void onNext(Pong value) {
+                    node.setId(new KadId(value.getNodeId()));
+                    synchronized (neighbours) {
+                        neighbours.add(node);
+                    }
+                    latch.countDown();
+                }
+
+                @Override
+                public void onError(Throwable throwable) {
+                    super.onError(throwable);
+                    latch.countDown();
+                }
+
+            });
+        }
+        try {
+            latch.await();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            LOG.warn("Bootstrap process interrupted", e);
+            return;
+        }
+        bootstrap(neighbours);
+    }
+
+    private void bootstrap(MinMaxPriorityQueue<KadNode> neighbours) {
+        NodeResolver resolver = new NodeResolver(getOwnerNode().getId(), this, neighbours);
+        resolver.resolve();
+    }
+
     private void refreshBuckets() {
         for (Iterator<KadId> iterator = routingTable.getLonelyBucketsRandomIds().iterator(); iterator.hasNext(); ) {
             KadId id = iterator.next();
@@ -224,9 +285,9 @@ public class Kademlia {
             }
             NodeResolver resolver = new NodeResolver(id, this, neighbours);
             if (iterator.hasNext())
-                executor.execute(resolver::getResult);
+                executor.execute(resolver::resolve);
             else // this method invoked from executor, so for last element we should make call directly to better utilize thread pool
-                resolver.getResult();
+                resolver.resolve();
         }
     }
 
@@ -242,10 +303,6 @@ public class Kademlia {
 
     private void deleteStaleKeys() {
         storage.removeOlderThan(options.getKeyMaxLifetimeMillis());
-    }
-
-    public static Kademlia getInstance(Storage storage) {
-        return getInstance(new KadOptions(), storage);
     }
 
     public static Kademlia getInstance(KadOptions options, Storage storage) {
@@ -287,6 +344,10 @@ public class Kademlia {
         return executor;
     }
 
+    Executor getGrpcExecutor() {
+        return grpcExecutor;
+    }
+
     KadOptions getOptions() {
         return options;
     }
@@ -297,6 +358,10 @@ public class Kademlia {
 
     Storage getStorage() {
         return storage;
+    }
+
+    Ping getPing() {
+        return ping;
     }
 
     private static class State {

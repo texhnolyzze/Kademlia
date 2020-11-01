@@ -11,7 +11,7 @@ import java.util.concurrent.ThreadLocalRandom;
 
 class KadId implements Comparable<KadId> {
 
-    static final int SIZE_BYTES = 4;
+    static final int SIZE_BYTES = 20;
     static final KadId MIN = new KadId(new byte[SIZE_BYTES], true);
     static final KadId MAX = new KadId(new byte[SIZE_BYTES], true);
     static {
@@ -36,12 +36,12 @@ class KadId implements Comparable<KadId> {
             this.raw = raw;
     }
 
-    public KadId(ByteString nodeId) {
+    KadId(ByteString nodeId) {
         this.raw = nodeId.toByteArray();
         this.asByteString = nodeId;
     }
 
-    private BigInteger asBigInteger() {
+    BigInteger asBigInteger() {
         if (asBigInteger == null)
             asBigInteger = new BigInteger(1, raw);
         return asBigInteger;
@@ -115,7 +115,7 @@ class KadId implements Comparable<KadId> {
     static KadId mid(KadId left, KadId right) {
         BigInteger bl = left.asBigInteger();
         BigInteger br = right.asBigInteger();
-        BigInteger mid = br.subtract(bl).divide(BigInteger.TWO);
+        BigInteger mid = bl.add(br.subtract(bl).divide(BigInteger.TWO));
         KadId res = new KadId(getBytes(mid), true);
         res.asBigInteger = mid;
         return res;

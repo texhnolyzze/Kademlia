@@ -4,15 +4,14 @@ import org.junit.jupiter.api.Test;
 
 import java.math.BigInteger;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 
 class KadIdTest {
 
     @Test
     void test() {
-        KadId min = KadId.MIN;
-        KadId max = KadId.MAX;
+        final KadId min = KadId.MIN;
+        final KadId max = KadId.MAX;
         KadId mid = KadId.mid(min, max);
         assertTrue(min.compareTo(mid) < 0);
         assertTrue(mid.compareTo(max) < 0);
@@ -24,6 +23,21 @@ class KadIdTest {
         byte[] dist = new byte[KadId.SIZE_BYTES];
         id.distanceTo(min, dist);
         assertEquals(BigInteger.ONE, new BigInteger(1, dist));
+        mid = KadId.mid(min, max);
+        for (int i = 0; i < 1000; i++) {
+            mid = KadId.mid(mid, max);
+        }
+        assertEquals(mid.asBigInteger().add(BigInteger.ONE), max.asBigInteger());
+        assertEquals(0, mid.compareTo(mid));
+        assertEquals(mid, mid);
+        assertNotEquals(mid, max);
+        dist = mid.distanceTo(max);
+        assertEquals(BigInteger.ONE, new BigInteger(1, dist));
+        for (int i = 0; i < 1000; i++) {
+            KadId random = KadId.randomBetween(min, max);
+            assertTrue(min.compareTo(random) <= 0);
+            assertTrue(random.compareTo(max) <= 0);
+        }
     }
 
 }

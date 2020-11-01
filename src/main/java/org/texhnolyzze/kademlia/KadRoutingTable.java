@@ -45,7 +45,7 @@ class KadRoutingTable {
                     n.split();
                     addNode(node);
                 } else {
-                    n.bucket.leastRecentlyUpdated().ping(Ping.newBuilder().setNodeId(kademlia.getOwnerNode().getId().asByteString()).build());
+                    n.bucket.leastRecentlyUpdated().ping();
                 }
             }
         } finally {
@@ -133,7 +133,7 @@ class KadRoutingTable {
         return (b >>> (7 - idx)) & 1;
     }
 
-    public boolean contains(KadNode node) {
+    boolean contains(KadNode node) {
         lock.readLock().lock();
         try {
             Node n = locate(node);

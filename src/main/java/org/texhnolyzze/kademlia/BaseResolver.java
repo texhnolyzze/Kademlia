@@ -31,9 +31,14 @@ abstract class BaseResolver<RPC_REQUEST, RPC_RESPONSE, RESULT> {
         phaser.register();
         ByteString ownerId = kademlia.getOwnerNode().getId().asByteString();
         RPC_REQUEST request = getRequest(ownerId, key.asByteString());
-        for (KadNode node : neighbours) {
-            phaser.register();
-            callMethod(node, request, createObserver(node, request));
+        lock.lock();
+        try {
+            for (KadNode node : neighbours) {
+                callMethod(node, request, createObserver(node, request));
+                phaser.register();
+            }
+        } finally {
+            lock.unlock();
         }
         phaser.arriveAndAwaitAdvance();
         return getResult();
@@ -83,12 +88,12 @@ abstract class BaseResolver<RPC_REQUEST, RPC_RESPONSE, RESULT> {
                         }
                     }
                     int count = sameAsInPreviousQuery ? neighbours.size() : kademlia.getOptions().getAlpha();
-                    for (KadNode n : neighbours) {
-                        if (!contacted.contains(n.getId())) {
+                    for (KadNode nextNode : neighbours) {
+                        if (!contacted.contains(nextNode.getId())) {
                             count--;
-                            callMethod(node, request, createObserver(node, request));
+                            callMethod(nextNode, request, createObserver(nextNode, request));
                             phaser.register();
-                            contacted.add(n.getId());
+                            contacted.add(nextNode.getId());
                             if (count == 0)
                                 break;
                         }
@@ -114,6 +119,11 @@ abstract class BaseResolver<RPC_REQUEST, RPC_RESPONSE, RESULT> {
             } finally {
                 phaser.arriveAndDeregister();
             }
+        }
+
+        @Override
+        public void onCompleted() {
+            super.onCompleted();
         }
 
     }

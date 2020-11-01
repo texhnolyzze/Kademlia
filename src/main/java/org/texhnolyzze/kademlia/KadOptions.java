@@ -16,7 +16,7 @@ public class KadOptions {
     private int grpcPoolSize = Runtime.getRuntime().availableProcessors();
     private long saveStateToFileIntervalMillis = 10_000;
 
-    KadOptions copy() {
+    public KadOptions copy() {
         KadOptions copy = new KadOptions();
         copy.k = this.k;
         copy.alpha = this.alpha;
