@@ -160,10 +160,10 @@ public class Kademlia {
     }
 
     public byte[] get(byte[] key) {
-        byte[] res = storage.get(key);
+        KadId id = new KadId(key, false);
+        byte[] res = storage.get(id.getRaw());
         if (res != null)
             return res;
-        KadId id = new KadId(key, false);
         MinMaxPriorityQueue<KadNode> neighbours = routingTable.getNeighboursOf(id, null, true);
         if (neighbours.isEmpty()) {
             LOG.warn("Can't get key {}, no neighbours found", id);
@@ -195,7 +195,6 @@ public class Kademlia {
         else
             storage.remove(key.getRaw());
         ByteString valAsByteString = ByteString.copyFrom(val);
-
         StoreRequest request = getStoreRequestBuilder().
             setKey(key.asByteString()).
             setVal(valAsByteString).

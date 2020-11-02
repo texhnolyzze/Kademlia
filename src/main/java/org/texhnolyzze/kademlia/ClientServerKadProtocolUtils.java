@@ -2,6 +2,7 @@ package org.texhnolyzze.kademlia;
 
 import com.google.common.collect.MinMaxPriorityQueue;
 import com.google.protobuf.ByteString;
+import io.grpc.Context;
 
 final class ClientServerKadProtocolUtils {
 
@@ -38,12 +39,14 @@ final class ClientServerKadProtocolUtils {
             } else
                 callStore = true;
             if (callStore) {
-                node.store(
-                    kademlia.getStoreRequestBuilder().
-                        setKey(ByteString.copyFrom(key)).
-                        setVal(ByteString.copyFrom(val)).
-                        build()
-                );
+                Context.current().fork().run(() -> {
+                    node.store(
+                        kademlia.getStoreRequestBuilder().
+                            setKey(ByteString.copyFrom(key)).
+                            setVal(ByteString.copyFrom(val)).
+                            build()
+                    );
+                });
             }
         });
         table.addNode(node);

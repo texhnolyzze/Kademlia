@@ -1,6 +1,7 @@
 package org.texhnolyzze.kademlia;
 
 import com.google.common.collect.MinMaxPriorityQueue;
+import io.grpc.Context;
 
 import java.util.*;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
@@ -45,7 +46,9 @@ class KadRoutingTable {
                     n.split();
                     addNode(node);
                 } else {
-                    n.bucket.leastRecentlyUpdated().ping();
+                    Context.current().fork().run(() ->
+                        n.bucket.leastRecentlyUpdated().ping()
+                    );
                 }
             }
         } finally {

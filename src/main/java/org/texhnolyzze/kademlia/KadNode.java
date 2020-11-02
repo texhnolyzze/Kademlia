@@ -16,6 +16,7 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Supplier;
 
 class KadNode {
 
@@ -119,20 +120,25 @@ class KadNode {
     private KademliaGrpc.KademliaStub stub() {
         if (stub == null) {
             Map.Entry<String, Integer> entry = Map.entry(getAddressAsString(), port);
+            Supplier<ManagedChannel> managedChannelSupplier = () ->
+                ManagedChannelBuilder.
+                forAddress(entry.getKey(), entry.getValue()).
+                executor(kademlia.getGrpcExecutor()).
+                usePlaintext().
+                build();
             ManagedChannelHolder holder = CHANNELS.computeIfAbsent(entry, addr ->
                 new ManagedChannelHolder(
-                    ManagedChannelBuilder.
-                        forAddress(addr.getKey(), addr.getValue()).
-                        executor(kademlia.getGrpcExecutor()).
-                        usePlaintext().
-                        build()
+                    managedChannelSupplier.get()
                 )
             );
             holder.lock.lock();
             try {
                 holder.refCount++;
                 stub = KademliaGrpc.newStub(holder.channel);
-                CHANNELS.putIfAbsent(entry, holder);
+//              previous value was null, this is possible. we should initialize channel again
+                if (CHANNELS.putIfAbsent(entry, holder) == null) {
+                    holder.channel = managedChannelSupplier.get();
+                }
             } finally {
                 holder.lock.unlock();
             }
@@ -160,19 +166,22 @@ class KadNode {
                     ManagedChannel channel = holder.channel;
                     channel.shutdown();
                     boolean interrupted = false;
-                    while (true) {
-                        try {
-                            boolean terminated = channel.awaitTermination(1, TimeUnit.MINUTES);
-                            if (terminated)
-                                break;
-                        } catch (InterruptedException e) {
-                            interrupted = true;
-                            LOG.error("Channel shutdown awaiting interrupted", e);
+                    try {
+                        while (true) {
+                            try {
+                                boolean terminated = channel.awaitTermination(1, TimeUnit.MINUTES);
+                                if (terminated)
+                                    break;
+                            } catch (InterruptedException e) {
+                                interrupted = true;
+                                LOG.error("Channel shutdown awaiting interrupted", e);
+                            }
                         }
+                    } finally {
+                        if (interrupted)
+                            Thread.currentThread().interrupt();
+                        CHANNELS.remove(entry);
                     }
-                    if (interrupted)
-                        Thread.currentThread().interrupt();
-                    CHANNELS.remove(entry);
                 }
             } finally {
                 holder.lock.unlock();
@@ -182,7 +191,7 @@ class KadNode {
 
     private static class ManagedChannelHolder {
 
-        private final ManagedChannel channel;
+        private ManagedChannel channel;
         private final Lock lock;
         private int refCount = 1;
 

@@ -2,6 +2,9 @@ package org.texhnolyzze.kademlia;
 
 import com.google.common.collect.MinMaxPriorityQueue;
 import com.google.protobuf.ByteString;
+import io.grpc.Context;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.*;
 import java.util.concurrent.Phaser;
@@ -11,12 +14,14 @@ import static java.util.stream.Collectors.toSet;
 
 abstract class BaseResolver<RPC_REQUEST, RPC_RESPONSE, RESULT> {
 
+    private static final Logger LOG = LoggerFactory.getLogger(BaseResolver.class);
+
     final KadId key;
     final Kademlia kademlia;
     final MinMaxPriorityQueue<KadNode> neighbours;
     private final Set<KadId> contacted;
     private final ReentrantLock lock = new ReentrantLock();
-    private final Phaser phaser = new Phaser();
+    private final Phaser phaser = new Phaser(1);
     private final Set<KadId> lastNeighbours;
 
     BaseResolver(KadId key, Kademlia kademlia, MinMaxPriorityQueue<KadNode> neighbours) {
@@ -28,14 +33,13 @@ abstract class BaseResolver<RPC_REQUEST, RPC_RESPONSE, RESULT> {
     }
 
     RESULT resolve() {
-        phaser.register();
         ByteString ownerId = kademlia.getOwnerNode().getId().asByteString();
         RPC_REQUEST request = getRequest(ownerId, key.asByteString());
         lock.lock();
         try {
             for (KadNode node : neighbours) {
-                callMethod(node, request, createObserver(node, request));
                 phaser.register();
+                callMethod(node, request, createObserver(node, request));
             }
         } finally {
             lock.unlock();
@@ -91,8 +95,15 @@ abstract class BaseResolver<RPC_REQUEST, RPC_RESPONSE, RESULT> {
                     for (KadNode nextNode : neighbours) {
                         if (!contacted.contains(nextNode.getId())) {
                             count--;
-                            callMethod(nextNode, request, createObserver(nextNode, request));
-                            phaser.register();
+                            Context.current().fork().run(() -> {
+                                phaser.register();
+                                try {
+                                    callMethod(nextNode, request, createObserver(nextNode, request));
+                                } catch (Exception e) {
+                                    LOG.error("Error when calling remote", e);
+                                    phaser.arriveAndDeregister();
+                                }
+                            });
                             contacted.add(nextNode.getId());
                             if (count == 0)
                                 break;
@@ -119,11 +130,6 @@ abstract class BaseResolver<RPC_REQUEST, RPC_RESPONSE, RESULT> {
             } finally {
                 phaser.arriveAndDeregister();
             }
-        }
-
-        @Override
-        public void onCompleted() {
-            super.onCompleted();
         }
 
     }

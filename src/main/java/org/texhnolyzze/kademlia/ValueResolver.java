@@ -13,7 +13,7 @@ class ValueResolver extends BaseResolver<FindValueRequest, FindValueResponse, by
 
     private static final Logger LOG = LoggerFactory.getLogger(ValueResolver.class);
 
-    private final Set<byte[]> values = new HashSet<>();
+    private final Set<ByteString> values = new HashSet<>();
     private KadNode nearestWithoutValue;
     private byte[] nearestWithoutValueDist = new byte[KadId.SIZE_BYTES];
     private byte[] tempDist = new byte[KadId.SIZE_BYTES];
@@ -30,7 +30,7 @@ class ValueResolver extends BaseResolver<FindValueRequest, FindValueResponse, by
         }
         if (values.size() > 1)
             LOG.warn("More than one value found for key {}", key);
-        return values.iterator().next();
+        return values.iterator().next().toByteArray();
     }
 
     @Override
@@ -72,7 +72,7 @@ class ValueResolver extends BaseResolver<FindValueRequest, FindValueResponse, by
         @Override
         void process(FindValueResponse response) {
             if (!response.getVal().isEmpty()) {
-                values.add(response.getVal().toByteArray());
+                values.add(response.getVal());
             } else {
                 if (nearestWithoutValue == null) {
                     nearestWithoutValue = node;
@@ -91,7 +91,7 @@ class ValueResolver extends BaseResolver<FindValueRequest, FindValueResponse, by
 
         @Override
         boolean proceedAfter(FindValueResponse response) {
-            return response.getVal() == null;
+            return values.isEmpty() && response.getVal() == null;
         }
 
         @Override
