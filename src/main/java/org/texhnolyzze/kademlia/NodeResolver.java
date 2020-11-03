@@ -17,7 +17,7 @@ class NodeResolver extends BaseResolver<FindNodeRequest, FindNodeResponse, MinMa
     }
 
     @Override
-    FindNodeRequest getRequest(ByteString ownerId, ByteString key) {
+    FindNodeRequest getRequest(ByteString key) {
         return kademlia.getFindNodeRequestBuilder().setKey(key).build();
     }
 

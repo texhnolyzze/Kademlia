@@ -48,7 +48,7 @@ class ValueResolver extends BaseResolver<FindValueRequest, FindValueResponse, by
     }
 
     @Override
-    FindValueRequest getRequest(ByteString ownerId, ByteString key) {
+    FindValueRequest getRequest(ByteString key) {
         return kademlia.getFindValueRequestBuilder().setKey(key).build();
     }
 

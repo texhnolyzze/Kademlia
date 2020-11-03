@@ -3,18 +3,16 @@ package org.texhnolyzze.kademlia;
 import com.google.common.collect.MinMaxPriorityQueue;
 import com.google.protobuf.ByteString;
 import io.grpc.Context;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
-import java.util.*;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 import java.util.concurrent.Phaser;
 import java.util.concurrent.locks.ReentrantLock;
 
 import static java.util.stream.Collectors.toSet;
 
 abstract class BaseResolver<RPC_REQUEST, RPC_RESPONSE, RESULT> {
-
-    private static final Logger LOG = LoggerFactory.getLogger(BaseResolver.class);
 
     final KadId key;
     final Kademlia kademlia;
@@ -33,8 +31,7 @@ abstract class BaseResolver<RPC_REQUEST, RPC_RESPONSE, RESULT> {
     }
 
     RESULT resolve() {
-        ByteString ownerId = kademlia.getOwnerNode().getId().asByteString();
-        RPC_REQUEST request = getRequest(ownerId, key.asByteString());
+        RPC_REQUEST request = getRequest(key.asByteString());
         lock.lock();
         try {
             for (KadNode node : neighbours) {
@@ -49,7 +46,7 @@ abstract class BaseResolver<RPC_REQUEST, RPC_RESPONSE, RESULT> {
     }
 
     abstract RESULT getResult();
-    abstract RPC_REQUEST getRequest(ByteString ownerId, ByteString key);
+    abstract RPC_REQUEST getRequest(ByteString key);
     abstract void callMethod(KadNode node, RPC_REQUEST request, BaseResolverStreamObserver<RPC_RESPONSE> observer);
     abstract BaseResolverStreamObserver<RPC_RESPONSE> createObserver(KadNode node, RPC_REQUEST request);
 
