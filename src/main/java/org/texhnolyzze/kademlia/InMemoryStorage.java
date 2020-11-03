@@ -2,8 +2,11 @@ package org.texhnolyzze.kademlia;
 
 import java.util.*;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import static java.util.Collections.singletonList;
+import static java.util.stream.Collectors.toList;
 
 class InMemoryStorage implements Storage {
 
@@ -58,31 +61,24 @@ class InMemoryStorage implements Storage {
     }
 
     @Override
-    public void getAll(TriConsumer<byte[], byte[], Boolean> consumer) {
+    public Iterable<Map.Entry<byte[], byte[]>> getAll() {
         lock.readLock().lock();
         try {
-            for (Iterator<Map.Entry<ByteKey, TimestampedData>> iterator = data.entrySet().iterator(); iterator.hasNext(); ) {
-                Map.Entry<ByteKey, TimestampedData> entry = iterator.next();
-                consumer.accept(entry.getKey().key, entry.getValue().data, !iterator.hasNext());
-            }
+            return data.entrySet().stream().map(entry -> Map.entry(entry.getKey().key, entry.getValue().data)).collect(toList());
         } finally {
             lock.readLock().unlock();
         }
     }
     
     @Override
-    public void getOlderThan(long durationMillis, TriConsumer<byte[], byte[], Boolean> consumer) {
+    public Iterable<Map.Entry<byte[], byte[]>> getOlderThan(long durationMillis) {
         long time = System.currentTimeMillis() - durationMillis;
         lock.readLock().lock();
         try {
             SortedMap<Long, List<ByteKey>> subMap = timestampIndex.headMap(time);
-            for (Iterator<Map.Entry<Long, List<ByteKey>>> iter1 = subMap.entrySet().iterator(); iter1.hasNext(); ) {
-                Map.Entry<Long, List<ByteKey>> entry = iter1.next();
-                for (Iterator<ByteKey> iter2 = entry.getValue().iterator(); iter2.hasNext(); ) {
-                    ByteKey key = iter2.next();
-                    consumer.accept(key.key, data.get(key).data, !iter1.hasNext() && !iter2.hasNext());
-                }
-            }
+            return subMap.values().stream().flatMap(Collection::stream).map(byteKey ->
+                Map.entry(byteKey.key, data.get(byteKey).data)).collect(toList()
+            );
         } finally {
             lock.readLock().unlock();
         }

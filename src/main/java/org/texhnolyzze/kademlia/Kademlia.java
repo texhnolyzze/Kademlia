@@ -105,9 +105,8 @@ public class Kademlia {
                 List<KadNode> neighbours = new ArrayList<>();
                 for (int i = 2 + KadId.SIZE_BYTES; i < state.length;) {
                     byte[] neighbourId = new byte[KadId.SIZE_BYTES];
-                    for (int j = 0; j < KadId.SIZE_BYTES; j++, i++) {
-                        neighbourId[j] = state[i + j];
-                    }
+                    System.arraycopy(state, i, neighbourId, 0, KadId.SIZE_BYTES);
+                    i += KadId.SIZE_BYTES;
                     int neighbourPort = ((state[i++] & 0xFF) << 8) | (state[i++] & 0xFF);
                     byte[] neighbourAddr = new byte[4];
                     neighbourAddr[0] = state[i++];
@@ -206,15 +205,21 @@ public class Kademlia {
 
                 @Override
                 public void onCompleted() {
-                    super.onCompleted();
-                    atLeastOneStored[0] = true;
-                    latch.countDown();
+                    try {
+                        atLeastOneStored[0] = true;
+                        super.onCompleted();
+                    } finally {
+                        latch.countDown();
+                    }
                 }
 
                 @Override
                 public void onError(Throwable throwable) {
-                    super.onError(throwable);
-                    latch.countDown();
+                    try {
+                        super.onError(throwable);
+                    } finally {
+                        latch.countDown();
+                    }
                 }
 
             });
@@ -253,17 +258,27 @@ public class Kademlia {
 
                 @Override
                 public void onNext(Pong value) {
-                    node.setId(new KadId(value.getNodeId()));
-                    synchronized (neighbours) {
-                        neighbours.add(node);
+                    try {
+                        node.setId(new KadId(value.getNodeId()));
+                        synchronized (neighbours) {
+                            if (!neighbours.contains(node))
+                                neighbours.add(node);
+                        }
+                    } finally {
+                        latch.countDown();
                     }
-                    latch.countDown();
                 }
 
                 @Override
                 public void onError(Throwable throwable) {
-                    super.onError(throwable);
-                    latch.countDown();
+                    try {
+                        super.onError(throwable);
+                        synchronized (neighbours) {
+                            neighbours.remove(node);
+                        }
+                    } finally {
+                        latch.countDown();
+                    }
                 }
 
             });
@@ -300,13 +315,15 @@ public class Kademlia {
     }
 
     private void republishKeys() {
-        storage.getOlderThan(options.getRepublishKeyIntervalMillis(), (key, val, isLast) -> {
-            KadId id = new KadId(key, true);
-            if (Boolean.TRUE.equals(isLast)) // this method invoked from executor, so for last element we should make call directly to better utilize thread pool
-                put0(id, val);
-            else
-                executor.execute(() -> put0(id, val));
-        });
+        Iterable<Map.Entry<byte[], byte[]>> entries = storage.getOlderThan(options.getRepublishKeyIntervalMillis());
+        for (Iterator<Map.Entry<byte[], byte[]>> iterator = entries.iterator(); iterator.hasNext(); ) {
+            Map.Entry<byte[], byte[]> entry = iterator.next();
+            KadId id = new KadId(entry.getKey(), true);
+            if (iterator.hasNext()) {
+                executor.execute(() -> put0(id, entry.getValue()));
+            } else
+                put0(id, entry.getValue()); // this method invoked from executor, so for last element we should make call directly to better utilize thread pool
+        }
     }
 
     private void deleteStaleKeys() {

@@ -38,10 +38,9 @@ class ValueResolver extends BaseResolver<FindValueRequest, FindValueResponse, by
         byte[] result = super.resolve();
         if (result != null && nearestWithoutValue != null) {
             nearestWithoutValue.store(
-                StoreRequest.newBuilder().
-                    setVal(ByteString.copyFrom(result)).
+                kademlia.getStoreRequestBuilder().
                     setKey(key.asByteString()).
-                    setNodeId(kademlia.getOwnerNode().getId().asByteString()).
+                    setVal(ByteString.copyFrom(result)).
                     build()
             );
         }

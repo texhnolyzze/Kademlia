@@ -3,8 +3,14 @@ package org.texhnolyzze.kademlia;
 import com.google.common.collect.MinMaxPriorityQueue;
 import com.google.protobuf.ByteString;
 import io.grpc.Context;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.Map;
 
 final class ClientServerKadProtocolUtils {
+
+    private static final Logger LOG = LoggerFactory.getLogger(ClientServerKadProtocolUtils.class);
 
     private ClientServerKadProtocolUtils() {
         throw new UnsupportedOperationException();
@@ -18,11 +24,14 @@ final class ClientServerKadProtocolUtils {
         KadRoutingTable table = kademlia.getRoutingTable();
         if (table.contains(node))
             return;
+        LOG.info("New node {} located on {}:{}", node.getId(), node.getAddressAsString(), node.getPort());
         Storage storage = kademlia.getStorage();
         byte[] dist1 = new byte[KadId.SIZE_BYTES];
         byte[] dist2 = new byte[KadId.SIZE_BYTES];
         KadNode owner = kademlia.getOwnerNode();
-        storage.getAll((key, val, isLast) -> {
+        for (Map.Entry<byte[], byte[]> entry : storage.getAll()) {
+            byte[] key = entry.getKey();
+            byte[] val = entry.getValue();
             KadId storeId = new KadId(key, true);
             MinMaxPriorityQueue<KadNode> neighbours = table.getNeighboursOf(storeId, null, false);
             boolean callStore = false;
@@ -48,7 +57,7 @@ final class ClientServerKadProtocolUtils {
                     );
                 });
             }
-        });
+        }
         table.addNode(node);
     }
 }

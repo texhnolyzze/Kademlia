@@ -1,5 +1,7 @@
 package org.texhnolyzze.kademlia;
 
+import java.util.Map;
+
 public interface Storage {
 
     /**
@@ -17,17 +19,14 @@ public interface Storage {
 
     /**
      * Get all key-value pairs
-     * @param consumer accepts triple (digested key, value, isLast)
-     *                 where isLast is indicator whether this triple is last triple
+     * @return  all pairs (digested key, value)
      */
-    void getAll(TriConsumer<byte[], byte[], Boolean> consumer);
+    Iterable<Map.Entry<byte[], byte[]>> getAll();
 
     /**
-     * Get all key-value pairs older than durationMillis
-     * @param consumer accepts triple (digested key, value, isLast)
-     *                 where isLast is indicator whether this triple is last triple
+     * @return pairs (digested key, value, isLast) older than durationMillis
      */
-    void getOlderThan(long durationMillis, TriConsumer<byte[], byte[], Boolean> consumer);
+    Iterable<Map.Entry<byte[], byte[]>> getOlderThan(long durationMillis);
 
     /**
      * Remove all key-value pairs older than durationMillis

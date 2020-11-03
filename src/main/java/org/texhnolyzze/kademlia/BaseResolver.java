@@ -76,7 +76,8 @@ abstract class BaseResolver<RPC_REQUEST, RPC_RESPONSE, RESULT> {
                         return;
                     for (Node n : extractNodeList(response)) {
                         KadNode kadNode = ClientServerKadProtocolUtils.convertToKadNode(n, kademlia);
-                        neighbours.add(kadNode);
+                        if (!neighbours.contains(kadNode))
+                            neighbours.add(kadNode);
                     }
                     boolean sameAsInPreviousQuery = true;
                     for (KadNode n : neighbours) {
@@ -97,12 +98,7 @@ abstract class BaseResolver<RPC_REQUEST, RPC_RESPONSE, RESULT> {
                             count--;
                             Context.current().fork().run(() -> {
                                 phaser.register();
-                                try {
-                                    callMethod(nextNode, request, createObserver(nextNode, request));
-                                } catch (Exception e) {
-                                    LOG.error("Error when calling remote", e);
-                                    phaser.arriveAndDeregister();
-                                }
+                                callMethod(nextNode, request, createObserver(nextNode, request));
                             });
                             contacted.add(nextNode.getId());
                             if (count == 0)
@@ -119,11 +115,11 @@ abstract class BaseResolver<RPC_REQUEST, RPC_RESPONSE, RESULT> {
 
         @Override
         public void onError(Throwable throwable) {
-            super.onError(throwable);
             try {
                 lock.lock();
                 try {
                     neighbours.remove(node);
+                    super.onError(throwable);
                 } finally {
                     lock.unlock();
                 }

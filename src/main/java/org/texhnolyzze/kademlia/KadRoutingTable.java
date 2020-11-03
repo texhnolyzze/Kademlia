@@ -2,11 +2,15 @@ package org.texhnolyzze.kademlia;
 
 import com.google.common.collect.MinMaxPriorityQueue;
 import io.grpc.Context;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.*;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 class KadRoutingTable {
+
+    private static final Logger LOG = LoggerFactory.getLogger(KadRoutingTable.class);
 
     private final Node root;
     private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
@@ -77,7 +81,7 @@ class KadRoutingTable {
                 res.addAll(node.bucket.nodes);
             else {
                 for (KadNode n : node.bucket.nodes) {
-                    if (!Arrays.equals(n.getId().getRaw(), exclude.getRaw()))
+                    if (!n.getId().equals(exclude))
                         res.add(n);
                 }
             }
@@ -120,7 +124,7 @@ class KadRoutingTable {
         byte[] raw = node.getId().getRaw();
         int bitidx = 0;
         while (!n.isLeaf()) {
-            int bit = getBit(raw, bitidx);
+            int bit = getBit(raw, bitidx++);
             if (bit == 0)
                 n = n.left;
             else
@@ -140,7 +144,7 @@ class KadRoutingTable {
         lock.readLock().lock();
         try {
             Node n = locate(node);
-            return n.bucket.nodes.contains(node);
+            return n.bucket.nodes.contains(node) || n.bucket.replacementCache.contains(node);
         } finally {
             lock.readLock().unlock();
         }
@@ -192,6 +196,8 @@ class KadRoutingTable {
         }
 
         boolean addNode(KadNode node, Kademlia kademlia) {
+            if (!holds(node))
+                LOG.warn("Attempt to insert node {} into bucket which can't hold it [{}, {}]", node.getId(), min, max);
             Iterator<KadNode> iterator = nodes.iterator();
             while (iterator.hasNext()) {
                 KadNode next = iterator.next();

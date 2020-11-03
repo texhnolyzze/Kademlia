@@ -8,9 +8,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.net.Inet4Address;
+import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.Arrays;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
@@ -26,7 +28,7 @@ class KadNode {
     private final byte[] address;
     private final Kademlia kademlia;
     private ByteString addressAsByteString;
-    private String addressAsString;
+    private final String addressAsString;
     private int port;
     private KademliaGrpc.KademliaStub stub;
     private NoopClientStreamObserver<Pong> pongClientStreamObserver;
@@ -40,6 +42,7 @@ class KadNode {
         this.kademlia = kademlia;
         this.address = address;
         this.port = port;
+        this.addressAsString = getAddressAsString0();
     }
 
     KadNode(byte[] address, int port, Kademlia kademlia) {
@@ -61,14 +64,19 @@ class KadNode {
     }
 
     String getAddressAsString() {
-        if (addressAsString == null) {
+        return addressAsString;
+    }
+
+    private String getAddressAsString0() {
+        if (address != null) {
             try {
-                return Inet4Address.getByAddress(address).getHostAddress();
+                return InetAddress.getByAddress(address).getHostAddress();
             } catch (UnknownHostException e) {
                 throw new KademliaException("Error converting to string", e);
             }
+        } else {
+            return InetAddress.getLoopbackAddress().getHostAddress();
         }
-        return addressAsString;
     }
 
     byte[] getAddress() {
@@ -187,6 +195,19 @@ class KadNode {
                 holder.lock.unlock();
             }
         }
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        KadNode kadNode = (KadNode) o;
+        return Objects.equals(id, kadNode.id);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(id);
     }
 
     private static class ManagedChannelHolder {
