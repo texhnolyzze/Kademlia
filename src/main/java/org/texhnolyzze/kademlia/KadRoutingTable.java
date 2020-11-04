@@ -63,10 +63,14 @@ class KadRoutingTable {
     }
 
     void removeNode(KadNode node) {
+        removeNode(node, false);
+    }
+
+    void removeNode(KadNode node, final boolean considerVersion) {
         lock.writeLock().lock();
         try {
             Node n = locate(node);
-            if (n.bucket.removeNode(node))
+            if (n.bucket.removeNode(node, considerVersion))
                 node.dispose();
         } finally {
             lock.writeLock().unlock();
@@ -265,11 +269,13 @@ class KadRoutingTable {
             return min.compareTo(node.getId()) <= 0 && node.getId().compareTo(max) <= 0;
         }
 
-        boolean removeNode(KadNode node) {
+        boolean removeNode(KadNode node, final boolean considerVersion) {
             Iterator<KadNode> iter = nodes.iterator();
             while (iter.hasNext()) {
                 KadNode next = iter.next();
                 if (next.getId().equals(node.getId())) {
+                    if (considerVersion && next.version() != node.version())
+                        continue;
                     iter.remove();
                     if (!replacementCache.isEmpty())
                         nodes.addFirst(replacementCache.removeFirst());
@@ -280,6 +286,8 @@ class KadRoutingTable {
             while (iter.hasNext()) {
                 KadNode next = iter.next();
                 if (next.getId().equals(node.getId())) {
+                    if (considerVersion && next.version() != node.version())
+                        continue;
                     iter.remove();
                     return true;
                 }

@@ -353,7 +353,7 @@ public class Kademlia {
                 boolean idEq = n1.getId().equals(n2.getId());
                 if ((addressEq && !idEq) || (!addressEq && idEq)) {
                     KadNode loser = n1.version() < n2.version() ? n2 : n1;
-                    routingTable.removeNode(loser);
+                    routingTable.removeNode(loser, true);
                 }
             }
         }
