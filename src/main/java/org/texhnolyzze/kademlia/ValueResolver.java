@@ -90,7 +90,7 @@ class ValueResolver extends BaseResolver<FindValueRequest, FindValueResponse, by
 
         @Override
         boolean proceedAfter(FindValueResponse response) {
-            return values.isEmpty() && response.getVal() == null;
+            return values.isEmpty() && response.getVal().isEmpty();
         }
 
         @Override

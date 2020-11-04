@@ -17,7 +17,7 @@ final class ClientServerKadProtocolUtils {
     }
 
     static KadNode convertToKadNode(Node n, Kademlia kademlia) {
-        return new KadNode(new KadId(n.getNodeId()), kademlia, n.getAddress().toByteArray(), n.getPort());
+        return new KadNode(new KadId(n.getNodeId()), kademlia, n.getAddress().toByteArray(), n.getPort(), -1);
     }
 
     static void baseHandle(final KadNode node, Kademlia kademlia) {

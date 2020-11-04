@@ -9,13 +9,15 @@ public class KadOptions {
     private double alphaFactor = 0.15;
     private int port = 0;
     private boolean overwritePersistedPort = false;
-    private int replacementCacheSize = k * 3;
+    private int replacementCacheSize;
+    private double replacementCacheSizeFactor = 2;
     private long refreshIntervalMillis = TimeUnit.HOURS.toMillis(1);
     private long republishKeyIntervalMillis = TimeUnit.HOURS.toMillis(1);
     private long keyMaxLifetimeMillis = TimeUnit.DAYS.toMillis(1);
     private int kademliaPoolSize = Runtime.getRuntime().availableProcessors();
     private int grpcPoolSize = Runtime.getRuntime().availableProcessors();
     private long saveStateToFileIntervalMillis = 10_000;
+    private long detectStaleNodesIntervalMillis = TimeUnit.MINUTES.toMillis(30);
 
     public KadOptions copy() {
         KadOptions copy = new KadOptions();
@@ -23,14 +25,16 @@ public class KadOptions {
         copy.alphaFactor = this.alphaFactor;
         copy.port = this.port;
         copy.overwritePersistedPort = this.overwritePersistedPort;
-        copy.replacementCacheSize = this.replacementCacheSize;
+        copy.replacementCacheSizeFactor = this.replacementCacheSizeFactor;
         copy.refreshIntervalMillis = this.refreshIntervalMillis;
         copy.republishKeyIntervalMillis = this.republishKeyIntervalMillis;
         copy.keyMaxLifetimeMillis = this.keyMaxLifetimeMillis;
         copy.kademliaPoolSize = this.kademliaPoolSize;
         copy.grpcPoolSize = this.grpcPoolSize;
         copy.saveStateToFileIntervalMillis = this.saveStateToFileIntervalMillis;
+        copy.detectStaleNodesIntervalMillis = this.detectStaleNodesIntervalMillis;
         copy.alpha = (int) Math.max(1, alphaFactor * k);
+        copy.replacementCacheSize = (int) Math.max(1, k * replacementCacheSizeFactor); // 0 cache size may produce livelock
         return copy;
     }
 
@@ -79,12 +83,12 @@ public class KadOptions {
         return this;
     }
 
-    public int getReplacementCacheSize() {
-        return replacementCacheSize;
+    public double getReplacementCacheSizeFactor() {
+        return replacementCacheSizeFactor;
     }
 
-    public KadOptions setReplacementCacheSize(int replacementCacheSize) {
-        this.replacementCacheSize = replacementCacheSize;
+    public KadOptions setReplacementCacheSizeFactor(double replacementCacheSizeFactor) {
+        this.replacementCacheSizeFactor = replacementCacheSizeFactor;
         return this;
     }
 
@@ -135,6 +139,19 @@ public class KadOptions {
     public KadOptions setSaveStateToFileIntervalMillis(long saveStateToFileIntervalMillis) {
         this.saveStateToFileIntervalMillis = saveStateToFileIntervalMillis;
         return this;
+    }
+
+    public long getDetectStaleNodesIntervalMillis() {
+        return detectStaleNodesIntervalMillis;
+    }
+
+    public KadOptions setDetectStaleNodesIntervalMillis(long detectStaleNodesIntervalMillis) {
+        this.detectStaleNodesIntervalMillis = detectStaleNodesIntervalMillis;
+        return this;
+    }
+
+    int getReplacementCacheSize() {
+        return replacementCacheSize;
     }
 
 }

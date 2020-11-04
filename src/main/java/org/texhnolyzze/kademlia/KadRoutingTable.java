@@ -50,6 +50,8 @@ class KadRoutingTable {
                     n.split();
                     addNode(node);
                 } else {
+//                  ping least recently updated node.
+//                  if it does not respond -- it will be removed from routing table
                     Context.current().fork().run(() ->
                         n.bucket.leastRecentlyUpdated().ping()
                     );
@@ -150,6 +152,29 @@ class KadRoutingTable {
         }
     }
 
+    ArrayList<KadNode> collectAll() {
+        lock.readLock().lock();
+        try {
+            ArrayList<KadNode> res = new ArrayList<>();
+            collectAll(root, res);
+            return res;
+        } finally {
+            lock.readLock().unlock();
+        }
+    }
+
+    private void collectAll(Node n, ArrayList<KadNode> dest) {
+        if (n.isLeaf()) {
+            dest.addAll(n.bucket.nodes);
+            dest.addAll(n.bucket.replacementCache);
+        } else {
+            if (n.left != null)
+                collectAll(n.left, dest);
+            if (n.right != null)
+                collectAll(n.right, dest);
+        }
+    }
+
     private static class Node {
 
         private Node left;
@@ -196,30 +221,16 @@ class KadRoutingTable {
         }
 
         boolean addNode(KadNode node, Kademlia kademlia) {
-            if (!holds(node))
-                LOG.warn("Attempt to insert node {} into bucket which can't hold it [{}, {}]", node.getId(), min, max);
-            Iterator<KadNode> iterator = nodes.iterator();
-            while (iterator.hasNext()) {
-                KadNode next = iterator.next();
-                if (next.getId().equals(node.getId())) {
-                    next.transferStubOrDispose(node);
-                    iterator.remove();
-                    break;
-                }
+            if (!holds(node)) {
+                LOG.error("Attempt to insert node {} into bucket which can't hold it [{}, {}]", node.getId(), min, max);
+                throw new KademliaException("Incorrect bucket");
             }
+            nodes.remove(node);
+            replacementCache.remove(node);
             if (nodes.size() < kademlia.getOptions().getK()) {
                 nodes.addFirst(node);
                 return true;
             } else {
-                iterator = replacementCache.iterator();
-                while (iterator.hasNext()) {
-                    KadNode next = iterator.next();
-                    if (next.getId().equals(node.getId())) {
-                        next.transferStubOrDispose(node);
-                        iterator.remove();
-                        break;
-                    }
-                }
                 while (replacementCache.size() >= kademlia.getOptions().getReplacementCacheSize()) {
                     replacementCache.removeLast();
                 }

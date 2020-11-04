@@ -4,12 +4,13 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 
 class InMemoryStorageTest {
 
     @Test
-    void test() throws InterruptedException {
+    void testStorage() throws InterruptedException {
         InMemoryStorage storage = new InMemoryStorage();
         byte[] key = {0, 1, 2};
         byte[] val = {0, 1, 2};

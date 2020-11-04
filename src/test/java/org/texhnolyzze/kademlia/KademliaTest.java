@@ -13,16 +13,19 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static java.util.Collections.singletonList;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class KademliaTest {
 
     @Test
     void test() throws InterruptedException {
         KadOptions options = new KadOptions();
-        options.setK(20);
+        options.setK(5);
         options.setSaveStateToFileIntervalMillis(-1L);
-//        options.setRefreshIntervalMillis(50L);
-//        options.setRepublishKeyIntervalMillis(50L);
+        options.setReplacementCacheSizeFactor(2);
+        options.setDetectStaleNodesIntervalMillis(100L);
+        options.setRefreshIntervalMillis(1000L);
+        options.setRepublishKeyIntervalMillis(1000L);
         options.setGrpcPoolSize(3);
         options.setKademliaPoolSize(3);
         List<Kademlia> kademlias = new ArrayList<>();
@@ -38,20 +41,31 @@ class KademliaTest {
         ThreadLocalRandom rand = ThreadLocalRandom.current();
         List<Map.Entry<byte[], byte[]>> data = new ArrayList<>();
         data.add(Map.entry(new byte[] {4}, new byte[] {2}));
+        bootstrapNode.put(data.get(0).getKey(), data.get(0).getValue());
         int numGet = 0;
         AtomicInteger numMatched = new AtomicInteger();
         int numStores = 0;
         AtomicInteger numStored = new AtomicInteger();
-        int n = 10000;
+        int n = 1000;
         for (int i = 0; i < n; i++) {
             Kademlia kademlia = kademlias.get(rand.nextInt(kademlias.size()));
-            if (rand.nextDouble() < 0.85) {
+            if (rand.nextDouble() < 0.5) {
                 numGet++;
                 Map.Entry<byte[], byte[]> entry = data.get(rand.nextInt(data.size()));
                 ForkJoinPool.commonPool().execute(() -> {
-                    byte[] actual = kademlia.get(entry.getKey());
+                    byte[] key = entry.getKey();
+                    byte[] actual = kademlia.get(key);
                     if (Arrays.equals(entry.getValue(), actual)) {
                         numMatched.getAndIncrement();
+                    } else {
+                        try {
+                            Thread.sleep(100L); // For some reason this is necessary sometimes
+                        } catch (InterruptedException e) {
+                            e.printStackTrace();
+                        }
+                        actual = kademlia.get(key);
+                        if (Arrays.equals(entry.getValue(), actual))
+                            numMatched.getAndIncrement();
                     }
                 });
             } else {
@@ -70,8 +84,12 @@ class KademliaTest {
             }
         }
         ForkJoinPool.commonPool().awaitTermination(100L, TimeUnit.SECONDS);
-        System.out.println("Matched " + ((double) numMatched.get() / numGet) * 100);
-        System.out.println("Stored " + ((double) numStored.get() / numStores) * 100);
+        double matchRatio = ((double) numMatched.get() / numGet) * 100;
+        double storeRatio = ((double) numStored.get() / numStores) * 100;
+        System.out.println("Matched " + matchRatio);
+        System.out.println("Stored " + storeRatio);
+        assertTrue(matchRatio >= 99);
+        assertTrue(storeRatio >= 99);
     }
 
 }

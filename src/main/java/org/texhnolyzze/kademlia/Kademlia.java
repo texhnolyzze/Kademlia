@@ -1,19 +1,22 @@
 package org.texhnolyzze.kademlia;
 
+import com.google.common.base.Preconditions;
 import com.google.common.collect.MinMaxPriorityQueue;
 import com.google.protobuf.ByteString;
 import io.grpc.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static java.nio.file.StandardOpenOption.*;
 import static java.util.stream.Collectors.toList;
@@ -31,13 +34,18 @@ public class Kademlia {
     private final FindNodeRequest findNodeRequest;
     private final FindValueRequest findValueRequest;
 
+    private final Pong pong;
+    private final FindValueResponse findValueResponse;
+    private final FindNodeResponse findNodeResponse;
+
     private final Storage storage;
     private final KadOptions options;
     private final ScheduledExecutorService executor;
     private final Executor grpcExecutor;
     private final KadRoutingTable routingTable;
+    private final AtomicLong version;
 
-    private final KadNode ownerNode;
+    private KadNode ownerNode;
 
     private Server server;
 
@@ -62,11 +70,12 @@ public class Kademlia {
         int port;
         State state = loadFromFile();
         if (state != null) {
-            ownerNode = new KadNode(new KadId(state.nodeId, true), this);
+            this.version = new AtomicLong(state.version);
             port = this.options.isOverwritePersistedPort() ? this.options.getPort() : state.port;
+            ownerNode = new KadNode(new KadId(state.nodeId, true), this, state.port, -1);
         } else {
+            this.version = new AtomicLong();
             port = this.options.getPort();
-            ownerNode = new KadNode(new KadId(), this);
         }
         this.routingTable = new KadRoutingTable(this);
         if (state != null) {
@@ -84,38 +93,43 @@ public class Kademlia {
                 }
             }).build();
             server.start();
-            ownerNode.setPort(server.getPort());
+            if (Objects.isNull(ownerNode))
+                ownerNode = new KadNode(new KadId(), this, server.getPort(), -1);
             LOG.info("Server started listening on port {}", server.getPort());
         } catch (IOException e) {
             throw new KademliaException("Can't initialize server", e);
         }
-        this.ping = Ping.newBuilder().setNodeId(getOwnerNode().getId().asByteString()).setPort(getOwnerNode().getPort()).build();
-        this.storeRequest = StoreRequest.newBuilder().setNodeId(getOwnerNode().getId().asByteString()).setPort(getOwnerNode().getPort()).build();
-        this.findNodeRequest = FindNodeRequest.newBuilder().setNodeId(getOwnerNode().getId().asByteString()).setPort(getOwnerNode().getPort()).build();
-        this.findValueRequest = FindValueRequest.newBuilder().setNodeId(getOwnerNode().getId().asByteString()).setPort(getOwnerNode().getPort()).build();
+        ByteString owner = ownerNode.getId().asByteString();
+        port = ownerNode.getPort();
+        this.ping = Ping.newBuilder().setNodeId(owner).setPort(port).build();
+        this.storeRequest = StoreRequest.newBuilder().setNodeId(owner).setPort(port).build();
+        this.findNodeRequest = FindNodeRequest.newBuilder().setNodeId(owner).setPort(port).build();
+        this.findValueRequest = FindValueRequest.newBuilder().setNodeId(owner).setPort(port).build();
+        this.pong = Pong.newBuilder().setNodeId(owner).build();
+        this.findNodeResponse = FindNodeResponse.newBuilder().setNodeId(owner).build();
+        this.findValueResponse = FindValueResponse.newBuilder().setNodeId(owner).build();
     }
 
     private State loadFromFile() {
         if (Files.exists(STATE_FILE)) {
-            try (InputStream stream = Files.newInputStream(STATE_FILE, READ)){
-                byte[] state = stream.readAllBytes();
-                int port = ((state[0] & 0xFF) << 8) | (state[1] & 0xFF);
+            try (DataInputStream stream = new DataInputStream(Files.newInputStream(STATE_FILE, READ))) {
+                long version = stream.readLong();
+                int numNeighbours = stream.readUnsignedShort();
+                int port = stream.readUnsignedShort();
                 byte[] nodeId = new byte[KadId.SIZE_BYTES];
-                System.arraycopy(state, 2, nodeId, 0, KadId.SIZE_BYTES);
-                List<KadNode> neighbours = new ArrayList<>();
-                for (int i = 2 + KadId.SIZE_BYTES; i < state.length;) {
+                readByteArray(nodeId, stream);
+                List<KadNode> neighbours = new ArrayList<>(numNeighbours);
+                for (int i = 0; i < numNeighbours; i++) {
+                    long neighbourVersion = stream.readLong();
                     byte[] neighbourId = new byte[KadId.SIZE_BYTES];
-                    System.arraycopy(state, i, neighbourId, 0, KadId.SIZE_BYTES);
-                    i += KadId.SIZE_BYTES;
-                    int neighbourPort = ((state[i++] & 0xFF) << 8) | (state[i++] & 0xFF);
+                    readByteArray(neighbourId, stream);
+                    int neighbourPort = stream.readUnsignedShort();
                     byte[] neighbourAddr = new byte[4];
-                    neighbourAddr[0] = state[i++];
-                    neighbourAddr[1] = state[i++];
-                    neighbourAddr[2] = state[i++];
-                    neighbourAddr[3] = state[i++];
-                    neighbours.add(new KadNode(new KadId(neighbourId, true), this, neighbourAddr, neighbourPort));
+                    readByteArray(neighbourAddr, stream);
+                    neighbours.add(new KadNode(new KadId(neighbourId, true), this, neighbourAddr, neighbourPort, neighbourVersion));
                 }
-                return new State(port, nodeId, neighbours);
+                Preconditions.checkState(stream.read() == -1, "EOF expected");
+                return new State(version, port, nodeId, neighbours);
             } catch (Exception e) {
                 LOG.warn("Error reading from file", e);
             }
@@ -123,31 +137,25 @@ public class Kademlia {
         return null;
     }
 
+    private void readByteArray(byte[] dest, InputStream stream) throws IOException {
+        int n = stream.read(dest);
+        if (n != dest.length)
+            throw new KademliaException("Expected " + dest.length + " bytes, got " + n);
+    }
+
     private void saveToFile() {
-        try (OutputStream stream = Files.newOutputStream(STATE_FILE, WRITE, TRUNCATE_EXISTING, CREATE)) {
+        try (DataOutputStream stream = new DataOutputStream(Files.newOutputStream(STATE_FILE, WRITE, TRUNCATE_EXISTING, CREATE))) {
             Collection<KadNode> neighbours = routingTable.getNeighboursOf(ownerNode.getId(), null, false);
-            byte[] state = new byte[(2 + KadId.SIZE_BYTES) + (neighbours.size() * (KadId.SIZE_BYTES + 2 + 4))];
-            int port = ownerNode.getPort();
-            int i = 0;
-            state[i++] = (byte) ((port >>> 8) & 0xFF);
-            state[i++] = (byte) (port & 0xFF);
-            for (int j = 0; j < KadId.SIZE_BYTES; i++, j++) {
-                state[i] = ownerNode.getId().getRaw()[j];
-            }
+            stream.writeLong(version.get());
+            stream.writeShort(neighbours.size());
+            stream.writeShort(ownerNode.getPort());
+            stream.write(ownerNode.getId().getRaw());
             for (KadNode node : neighbours) {
-                for (int j = 0; j < KadId.SIZE_BYTES; j++, i++) {
-                    state[i] = node.getId().getRaw()[j];
-                }
-                port = node.getPort();
-                state[i++] = (byte) ((port >>> 8) & 0xFF);
-                state[i++] = (byte) (port & 0xFF);
-                byte[] address = node.getAddress();
-                state[i++] = address[0];
-                state[i++] = address[1];
-                state[i++] = address[2];
-                state[i++] = address[3];
+                stream.writeLong(node.version());
+                stream.write(node.getId().getRaw());
+                stream.writeShort(node.getPort());
+                stream.write(node.getAddress());
             }
-            stream.write(state);
             stream.flush();
         } catch (Exception e) {
             LOG.warn("Error saving state to file", e);
@@ -243,7 +251,7 @@ public class Kademlia {
 
     public void bootstrap(List<InetSocketAddress> addresses) {
         List<KadNode> nodes = addresses.stream().map(address ->
-            new KadNode(address.getAddress().getAddress(), address.getPort(), this)
+            new KadNode(address.getAddress().getAddress(), address.getPort(), this, -1)
         ).collect(toList());
         CountDownLatch latch = new CountDownLatch(nodes.size());
         byte[] dist1 = new byte[KadId.SIZE_BYTES];
@@ -326,6 +334,31 @@ public class Kademlia {
         }
     }
 
+    /**
+     * Given two nodes n1 and n2 there are 4 possibilities:
+     * 1) n1.address == n2.address && n1.id == n2.id -- Same node
+     * 2) n1.address != n2.address && n1.id != n2.id -- Different nodes
+     * 3) n1.address == n2.address && n1.id != n2.id -- Most probably same node that failed, then returned, but it's id was not persisted
+     * 4) n1.address != n2.address && n1.id == n2.id -- Same as above, but this time address was not persisted
+     * So, for case 3 and 4 we must detect such nodes in our routing table and compare their versions.
+     * Node with smaller version is removed and in 4th case it's ManagedChannel is also shutdown.
+     */
+    private void detectStaleNodes() {
+        ArrayList<KadNode> nodes = routingTable.collectAll();
+        for (int i = 0; i < nodes.size() - 1; i++) {
+            for (int j = i + 1; j < nodes.size(); j++) {
+                KadNode n1 = nodes.get(i);
+                KadNode n2 = nodes.get(j);
+                boolean addressEq = n1.addressEq(n2);
+                boolean idEq = n1.getId().equals(n2.getId());
+                if ((addressEq && !idEq) || (!addressEq && idEq)) {
+                    KadNode loser = n1.version() < n2.version() ? n2 : n1;
+                    routingTable.removeNode(loser);
+                }
+            }
+        }
+    }
+
     private void deleteStaleKeys() {
         storage.removeOlderThan(options.getKeyMaxLifetimeMillis());
     }
@@ -362,6 +395,12 @@ public class Kademlia {
                 TimeUnit.MILLISECONDS
             );
         }
+        exec.scheduleWithFixedDelay(
+            kademlia::detectStaleNodes,
+            opts.getDetectStaleNodesIntervalMillis(),
+            opts.getDetectStaleNodesIntervalMillis(),
+            TimeUnit.MILLISECONDS
+        );
         return kademlia;
     }
 
@@ -401,13 +440,31 @@ public class Kademlia {
         return FindValueRequest.newBuilder(findValueRequest);
     }
 
+    Pong getPong() {
+        return pong;
+    }
+
+    FindNodeResponse.Builder getFindNodeResponseBuilder() {
+        return FindNodeResponse.newBuilder(findNodeResponse);
+    }
+
+    FindValueResponse.Builder getFindValueResponseBuilder() {
+        return FindValueResponse.newBuilder(findValueResponse);
+    }
+
+    long nextVersion() {
+        return version.getAndIncrement();
+    }
+
     private static class State {
 
+        private final long version;
         private final int port;
         private final byte[] nodeId;
         private final List<KadNode> neighbours;
 
-        private State(int port, byte[] nodeId, List<KadNode> neighbours) {
+        private State(long version, int port, byte[] nodeId, List<KadNode> neighbours) {
+            this.version = version;
             this.port = port;
             this.nodeId = nodeId;
             this.neighbours = neighbours;

@@ -1,5 +1,6 @@
 package org.texhnolyzze.kademlia;
 
+import com.google.common.base.Preconditions;
 import com.google.protobuf.ByteString;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
@@ -17,7 +18,6 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
-import java.util.function.Supplier;
 
 class KadNode {
 
@@ -28,24 +28,30 @@ class KadNode {
     private final Kademlia kademlia;
     private ByteString addressAsByteString;
     private final String addressAsString;
-    private int port;
+    private final int port;
+    private final long version;
     private KademliaGrpc.KademliaStub stub;
     private NoopClientStreamObserver<Pong> pongClientStreamObserver;
 
-    KadNode(KadId id, Kademlia kademlia) {
-        this(id, kademlia, null, -1);
+    KadNode(KadId id, Kademlia kademlia, int port, long version) {
+        this(id, kademlia, null, port, version);
     }
 
-    KadNode(KadId id, Kademlia kademlia, byte[] address, int port) {
+    KadNode(KadId id, Kademlia kademlia, byte[] address, int port, long version) {
         this.id = id;
         this.kademlia = kademlia;
         this.address = address;
         this.port = port;
         this.addressAsString = getAddressAsString0();
+        this.version = version < 0 ? kademlia.nextVersion() : version;
     }
 
-    KadNode(byte[] address, int port, Kademlia kademlia) {
-        this(null, kademlia, address, port);
+    KadNode(byte[] address, int port, Kademlia kademlia, long version) {
+        this(null, kademlia, address, port, version);
+    }
+
+    long version() {
+        return version;
     }
 
     void setId(KadId id) {
@@ -56,6 +62,10 @@ class KadNode {
         if (pongClientStreamObserver == null)
             pongClientStreamObserver = new NoopClientStreamObserver<>(this, kademlia);
         return pongClientStreamObserver;
+    }
+
+    boolean addressEq(KadNode other) {
+        return Arrays.equals(address, other.address) && port == other.port;
     }
 
     KadId getId() {
@@ -92,10 +102,6 @@ class KadNode {
         return port;
     }
 
-    void setPort(int port) {
-        this.port = port;
-    }
-
     void ping() {
         ping(null);
     }
@@ -122,54 +128,38 @@ class KadNode {
         stub().findValue(request, responseObserver);
     }
 
-    private static final ConcurrentMap<Map.Entry<String, Integer>, ManagedChannelHolder> CHANNELS = new ConcurrentHashMap<>();
+    static final ConcurrentMap<Map.Entry<String, Integer>, ManagedChannelHolder> CHANNELS = new ConcurrentHashMap<>();
 
-    private KademliaGrpc.KademliaStub stub() {
+    synchronized KademliaGrpc.KademliaStub stub() {
         if (stub == null) {
             Map.Entry<String, Integer> entry = Map.entry(getAddressAsString(), port);
-            Supplier<ManagedChannel> managedChannelSupplier = () ->
-                ManagedChannelBuilder.
-                forAddress(entry.getKey(), entry.getValue()).
-                executor(kademlia.getGrpcExecutor()).
-                usePlaintext().
-                build();
-            ManagedChannelHolder holder = CHANNELS.computeIfAbsent(entry, addr ->
-                new ManagedChannelHolder(
-                    managedChannelSupplier.get()
-                )
-            );
-            holder.lock.lock();
-            try {
-                holder.refCount++;
-                stub = KademliaGrpc.newStub(holder.channel);
-//              previous value was null, this is possible. we should initialize channel again
-                if (CHANNELS.putIfAbsent(entry, holder) == null) {
-                    holder.channel = managedChannelSupplier.get();
-                }
-            } finally {
-                holder.lock.unlock();
-            }
+            ManagedChannelHolder h = CHANNELS.compute(entry, (k, holder) -> {
+                if (holder == null) {
+                    holder = new ManagedChannelHolder(
+                        ManagedChannelBuilder.
+                            forAddress(entry.getKey(), entry.getValue()).
+                            executor(kademlia.getGrpcExecutor()).
+                            usePlaintext().
+                            build()
+                    );
+                } else
+                    holder.refCount++;
+                Preconditions.checkState(!holder.channel.isTerminated() && !holder.channel.isShutdown(), "Channel shutdown or terminated");
+                return holder;
+            });
+            this.stub = KademliaGrpc.newStub(h.channel);
         }
         return stub;
     }
 
-    void transferStubOrDispose(KadNode transferTo) {
-        if (stub == null)
-            return;
-        if (this.port == transferTo.port && Arrays.equals(this.address, transferTo.address)) {
-            transferTo.stub = this.stub;
-        } else {
-            dispose();
-        }
-    }
-
-    void dispose() {
+    synchronized void dispose() {
         if (stub != null) {
-            Map.Entry<String, Integer> entry = Map.entry(getAddressAsString(), port);
-            ManagedChannelHolder holder = CHANNELS.get(entry);
-            holder.lock.lock();
-            try {
-                if (--holder.refCount == 0) {
+            stub = null;
+            Map.Entry<String, Integer> entry = Map.entry(addressAsString, port);
+            CHANNELS.computeIfPresent(entry, (k, holder) -> {
+                holder.refCount--;
+                if (holder.refCount == 0) {
+                    Preconditions.checkState(!holder.channel.isShutdown() && !holder.channel.isTerminated(), "Channel already shutdown or terminated!");
                     ManagedChannel channel = holder.channel;
                     channel.shutdown();
                     boolean interrupted = false;
@@ -187,19 +177,18 @@ class KadNode {
                     } finally {
                         if (interrupted)
                             Thread.currentThread().interrupt();
-                        CHANNELS.remove(entry);
                     }
+                    return null;
                 }
-            } finally {
-                holder.lock.unlock();
-            }
+                return holder;
+            });
         }
     }
 
     @Override
+    @SuppressWarnings("EqualsWhichDoesntCheckParameterClass")
     public boolean equals(Object o) {
         if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
         KadNode kadNode = (KadNode) o;
         return Objects.equals(id, kadNode.id);
     }
@@ -209,11 +198,11 @@ class KadNode {
         return Objects.hash(id);
     }
 
-    private static class ManagedChannelHolder {
+    static class ManagedChannelHolder {
 
-        private ManagedChannel channel;
-        private final Lock lock;
-        private int refCount = 1;
+        ManagedChannel channel;
+        final Lock lock;
+        int refCount = 1;
 
         private ManagedChannelHolder(ManagedChannel channel) {
             this.channel = channel;

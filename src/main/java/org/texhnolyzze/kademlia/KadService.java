@@ -19,7 +19,7 @@ class KadService extends KademliaGrpc.KademliaImplBase {
     public void ping(Ping request, StreamObserver<Pong> responseObserver) {
         KadNode node = getNode(request.getNodeId(), request.getPort());
         ClientServerKadProtocolUtils.baseHandle(node, kademlia);
-        responseObserver.onNext(pong());
+        responseObserver.onNext(kademlia.getPong());
         responseObserver.onCompleted();
     }
 
@@ -29,7 +29,7 @@ class KadService extends KademliaGrpc.KademliaImplBase {
         ClientServerKadProtocolUtils.baseHandle(node, kademlia);
         Storage storage = kademlia.getStorage();
         storage.put(request.getKey().toByteArray(), request.getVal().toByteArray());
-        responseObserver.onNext(pong());
+        responseObserver.onNext(kademlia.getPong());
         responseObserver.onCompleted();
     }
 
@@ -38,7 +38,7 @@ class KadService extends KademliaGrpc.KademliaImplBase {
         KadNode node = getNode(request.getNodeId(), request.getPort());
         ClientServerKadProtocolUtils.baseHandle(node, kademlia);
         KadId id = new KadId(request.getKey());
-        FindNodeResponse.Builder builder = FindNodeResponse.newBuilder().setNodeId(kademlia.getOwnerNode().getId().asByteString());
+        FindNodeResponse.Builder builder = kademlia.getFindNodeResponseBuilder();
         setNodes(builder, id, node.getId(), FindNodeResponse.Builder::addNodes);
         responseObserver.onNext(builder.build());
         responseObserver.onCompleted();
@@ -51,7 +51,7 @@ class KadService extends KademliaGrpc.KademliaImplBase {
         KadId id = new KadId(request.getKey());
         byte[] key = id.getRaw();
         Storage storage = kademlia.getStorage();
-        FindValueResponse.Builder builder = FindValueResponse.newBuilder().setNodeId(kademlia.getOwnerNode().getId().asByteString());
+        FindValueResponse.Builder builder = kademlia.getFindValueResponseBuilder();
         byte[] val = storage.get(key);
         if (val != null) {
             builder.setVal(ByteString.copyFrom(val));
@@ -76,15 +76,9 @@ class KadService extends KademliaGrpc.KademliaImplBase {
         }
     }
 
-    private Pong pong() {
-        return Pong.newBuilder().setNodeId(
-            kademlia.getOwnerNode().getId().asByteString()
-        ).build();
-    }
-
     private KadNode getNode(ByteString nodeId, int port) {
         InetSocketAddress address = Kademlia.REMOTE_ADDR.get();
-        return new KadNode(new KadId(nodeId), kademlia, address.getAddress().getAddress(), port);
+        return new KadNode(new KadId(nodeId), kademlia, address.getAddress().getAddress(), port, -1);
     }
 
 }
